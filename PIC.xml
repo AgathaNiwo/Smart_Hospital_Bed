@@ -1,0 +1,472 @@
+LIST    p=16F887
+#include <p16F887.inc>
+    __CONFIG _CONFIG1, _LVP_OFF & _FCMEN_OFF & _IESO_OFF & _BOR_OFF & _CPD_OFF & _CP_OFF & _MCLRE_OFF & _PWRTE_ON & _WDT_OFF & _INTRC_OSC_NOCLKOUT
+    __CONFIG _CONFIG2, _WRT_OFF & _BOR21V
+
+#DEFINE 	RS 	0
+#DEFINE 	E 	1
+#DEFINE 	RW 	2
+#DEFINE 	temperature 	0
+#DEFINE 	pressure 	1
+#DEFINE		gie		7
+
+N 	EQU 	0X21
+M 	EQU 	0X22
+Nx 	EQU 	0X23
+Mx 	EQU 	0X24
+; P 	EQU 	0X25
+; Leave 16 bytes and Continue with local variables
+
+    cblock    0x1d        	; Start of block
+
+    count1       		; Counter # 1
+    count2        		; Counter # 2
+    count3       		; Counter # 3
+   	count4        		; Counter # 4
+    count5       		; Counter # 5
+    pic_ad       		; Storage for start of text area
+               		 	; (labeled strData) in PIC RAM
+    J            		; counter J
+    K            		; counter K
+    index       		; Index into text table (also used
+                		; for auxiliary storage)
+	var
+	patient
+	bed
+	sensors
+	patient_timer
+    endc
+
+
+
+ORG 	0X00 	; Reset address
+GOTO 	START
+org 04 ;Interrupt Service Routine starts here
+goto Int_Routine
+org 0010
+
+START
+
+				BANKSEL     ANSELH
+				CLRF        ANSELH
+				BANKSEL	    TRISD
+                CLRF        TRISD 	; PORTD used as data pins
+                CLRF        TRISE 	; PORTE as control pins
+				MOVLW	    0X03
+				MOVWF       TRISC
+				MOVLW	    0X0F
+				MOVWF	    TRISB
+				MOVLW	    0X07
+				MOVWF	    OPTION_REG
+                BANKSEL     PORTD
+				CLRF        PORTC
+                CLRF        PORTD
+                CLRF        PORTE
+				BANKSEL		INTCON
+				BSF 		INTCON,gie ;enable global int
+				BANKSEL		PORTE
+
+LCD_INIT
+; code for LCD initialistation from Amini Ntakirutimana
+; Initialize the LCD controller
+				bcf  		PORTE, RS
+				bcf 		PORTE, E
+				bcf 		PORTE, RW
+
+; set the function set
+
+				 MOVLW 		38H
+				 MOVWF 		PORTD 		; 8 bits 2 lines 5*7 mode.
+ 				 CALL    	REJECT
+ 				 CALL    	DELAY
+
+; set the display off
+				MOVLW 	08H
+			 	MOVWF 	PORTD
+ 				CALL    REJECT
+ 				CALL    DELAY
+
+; Set the display and cursor on
+ 				MOVLW  	0CH
+ 				MOVWF 	PORTD 			; the 1st line address.
+ 				CALL    REJECT
+ 				CALL    DELAY
+
+; set the entry mode
+ 				MOVLW 	06H 			; display on, cursor on, blink on.
+ 				MOVWF 	PORTD
+ 				CALL    REJECT
+ 				CALL    DELAY
+
+; Cursor and shift delay
+				MOVLW 	14H
+ 				MOVWF 	PORTD 			; clr screen
+ 				CALL    REJECT
+ 				CALL    DELAY
+				MOVLW 	40H
+ 				MOVWF 	PORTD
+ 				CALL    REJECT
+ 				CALL    DELAY
+
+; clear the LCD display
+ 				MOVLW 	01H
+ 				MOVWF 	PORTD 			; clr screen
+ 				CALL    REJECT
+ 				CALL    DELAY
+
+ ; shift to data mode
+				bsf    PORTE, 0
+
+; main program
+				CLRF 	bed
+				MOVLW	D'256'
+				MOVWF	patient_timer
+
+MAIN
+               ;button to change the stautus to occupied
+				BCF PORTB,4
+				BSF PORTB, 5
+				BSF PORTB, 6
+				BSF PORTB, 7
+				BTFSS PORTB, 0
+				CALL PRINTOCCUPIED
+
+				;button to check the status	
+				BSF PORTB, 4				
+				BCF PORTB,5
+				BSF PORTB, 6
+				BSF PORTB, 7
+				BTFSS PORTB, 0
+				CALL PRINTSTATUS
+				
+				;button to change the stautus to un-occupied
+				BCF PORTB, 4
+				BSF PORTB,5
+				BSF PORTB, 6
+				BSF PORTB, 7
+				BTFSS PORTB, 1
+				CALL PRINT_UN_OCCUPIED
+
+				;button for simulating temperature sensor	
+				BSF PORTB, 4
+				BCF PORTB,5
+				BSF PORTB, 6
+				BSF PORTB, 7
+				BTFSS PORTB, 1
+				CALL TEMPHIGH
+
+				;alarm button
+				BCF 	PORTB, 4
+				BSF 	PORTB,5
+				BSF 	PORTB, 6
+				BSF 	PORTB, 7
+				BTFSS 	PORTB, 2
+				CALL 	dobuzzer
+
+				;button for simulating pressure sensor
+				BSF 	PORTB, 4
+				BCF 	PORTB,5
+				BSF 	PORTB, 6
+				BSF 	PORTB, 7
+				BTFSS 	PORTB, 2
+				CALL 	PRESSL
+
+				;button for passowrd key 1
+				MOVLW 	0
+				MOVWF 	var
+				BCF 	PORTB, 4
+				BSF 	PORTB,5
+				BSF 	PORTB, 6
+				BSF 	PORTB, 7
+				BTFSS 	PORTB, 3
+				CALL 	PRINT2
+
+				;button for passowrd key 2
+				MOVLW 	1
+				MOVWF 	var
+				BSF 	PORTB, 4
+				BCF 	PORTB,5
+				BSF 	PORTB, 6
+				BSF 	PORTB, 7
+				BTFSS 	PORTB, 3
+				CALL 	PRINT2
+	
+				;button for passowrd key 3
+				MOVLW 	2
+				MOVWF 	var
+				BSF 	PORTB, 4
+				BSF 	PORTB,5
+				BCF 	PORTB, 6
+				BSF 	PORTB, 7
+				BTFSS 	PORTB, 3
+				CALL 	PRINT2
+				
+				;button to reset the sensors
+				MOVLW 	3
+				MOVWF 	var
+				BSF 	PORTB, 4
+				BSF 	PORTB,5
+				BSF 	PORTB, 6
+				BCF 	PORTB, 7
+				BTFSS 	PORTB, 3
+				CALL 	RESET_SENSORS
+
+				;loop thrugh main
+				GOTO MAIN
+							
+				; when temeperature goes high	
+TEMPHIGH		CALL PRINT_TEMPHIGH
+				BSF	 sensors, temperature
+				BSF	PORTC, 3
+				return
+
+				; when pressure sensor is 0ff
+PRESSL			CALL PRINT_PATOFF
+				BSF	 sensors,pressure
+				bsf INTCON,5 ;enable timer overflow interrupt
+				movlw D'0' ;preload counter, so that 250 cycles
+				movwf TMR0
+				return
+
+				;look-up table
+table 			addwf PCL
+				retlw '1'
+				retlw '2'
+				retlw '3'
+				retlw '4'
+				retlw '5'
+				retlw '6'
+				retlw '7'
+				retlw '8'
+				retlw '9'
+				retlw 'A'
+				retlw 'B'
+				retlw 'G'
+				retlw 'T'
+				retlw 'H'
+				retlw 'A'
+				retlw '#'
+				Continue
+
+				; macro for display
+display 		macro const
+				MOVLW const
+				MOVWF   PORTD
+                CALL    DISPLAY_DATA_ON_LCD
+				endm
+		
+				;screen clear 
+SCREEN_CLR		BCF 	PORTE,0
+				BSF 	PORTE,1
+				MOVLW 	01H
+ 				MOVWF 	PORTD 			
+ 				CALL    REJECT
+ 				CALL    DELAY
+				BSF    	PORTE, 0
+				RETURN	
+		
+				;print 
+PRINT			CALL 	SCREEN_CLR
+				MOVFW 	var
+				call	table
+			 	MOVWF   PORTD
+                CALL    DISPLAY_DATA_ON_LCD
+				CLRF 	var
+                CALL    DELAY
+                RETURN
+
+				;print with out the screen-clear
+PRINT2			MOVFW 	var
+				call	table
+			 	MOVWF   PORTD
+                CALL    DISPLAY_DATA_ON_LCD
+				CLRF 	var
+                CALL    DELAY
+                RETURN
+
+	
+REJECT	       BSF        PORTE,1
+                CALL       DELAY
+                CALL       DELAY
+                BCF        PORTE,1
+                CALL       DELAY
+                RETURN
+
+DISPLAY_DATA_ON_LCD
+                BSF        PORTE,1
+                BSF        PORTE,0 ; data mode
+                CALL       DELAY
+                BCF        PORTE,0 ; command mode
+                CALL       DELAY
+                RETURN
+				
+				;display ona  new line	
+DISPLAY_2_LINE 	bcf    PORTE, 0
+				MOVLW 	0xC0
+ 				MOVWF 	PORTD 			; clr screen
+ 				CALL    REJECT
+ 				CALL    DELAY
+				bsf    PORTE, 0
+				RETURN
+	
+				;alarm. put buzzer on and put LED on
+dobuzzer		BSF        PORTC,2
+ 				BSF        PORTC,7
+				CALL       DELAY
+				BCF        PORTC,2
+ 				BCF        PORTC,7
+				RETURN
+
+				;reset sensors
+RESET_SENSORS	BCF			sensors,temperature
+				BCF			sensors,pressure
+				BCF	PORTC, 3
+				bcf INTCON,2
+				bcf INTCON,5
+				CALL SCREEN_CLR
+				RETURN
+
+
+PRINT_UN_OCCUPIED	CALL 	SCREEN_CLR	
+				MOVLW 	4
+				MOVWF 	patient
+PRINT_UN_OCCUPIED2				display	 	'U'
+				display	 	'N'
+				display	 	'-'
+				CALL PRINTOCCUPIED2
+				CLRF 	var
+                		CALL    DELAY
+                		RETURN
+
+PRINTOCCUPIED	CALL 	SCREEN_CLR
+				MOVLW 	0
+				MOVWF 	patient
+PRINTOCCUPIED2				display	'O'
+			 	display 'C'
+			 	display 'C
+				display'U'
+			 	display	'P'
+			 	display'I'
+			 	display'E'
+			 	display	'D'
+				CLRF 	var
+                		CALL    DELAY
+                		RETURN
+
+PRINT_TEMPHIGH	CALL 	SCREEN_CLR
+PRINT_TEMPHIGH2				display	'T'
+			 	display 'E'
+			 	display	'M'
+				display	 	'P'
+				display	 	'-'
+				display	 	'H'
+				display	 	'I'
+				CALL    DELAY
+                		RETURN
+
+PRINT_PATOFF	CALL 	SCREEN_CLR
+PRINT_PATOFF2	display		'P'
+				display	 	'A'
+				display	 	'T'
+				display	 	'-'
+				display	 	'O'
+				display	 	'F'
+				display	 	'F'
+				CALL    DELAY
+                RETURN
+
+PRINTSTATUS		CALL 	SCREEN_CLR
+				display	 	'S'
+				display	 	'T'
+				display	 	'A'
+				display	 	'T'
+				display	 	'U'
+				display	 	'S'
+				display		':'
+				display	 	' '
+				BTFSC 	patient,2
+				CALL 	PRINT_UN_OCCUPIED2
+				BTFSS 	patient,2
+				CALL PRINT_OCC
+				RETURN
+
+PRINT_OCC	CALL 	PRINTOCCUPIED2
+			display	 	':'
+			display	 	' '
+			CALL 	DISPLAY_2_LINE
+			BTFSC 	sensors,temperature
+			CALL 	PRINT_TEMPHIGH2
+			display	 	':'
+			display	 	' '
+			BTFSC 	sensors,pressure
+			CALL 	PRINT_PATOFF2	
+			RETURN
+
+PRINT_PAT	CALL 	SCREEN_CLR
+			BSF     PORTC,2
+			CALL    DELAY
+			BCF     PORTC,2
+			CALL 	PRINT_PATOFF2
+			display	 	'-'
+			display	 	' '
+			display	 	'C'
+			display	 	'H'
+			display	 	'E'
+			display	 	'C'
+			display	 	'K'
+			RETURN
+
+Int_Routine		MOVLW 0
+				MOVWF	TMR0
+				BCF INTCON, 2
+				BTFSC	sensors,pressure
+				CALL PAT_TIMER
+				RETFIE
+
+PAT_TIMER		DECFSZ	patient_timer
+				RETURN
+				CALL PRINT_PAT
+				BCF INTCON, 5
+				MOVLW	D'256'
+				MOVWF	patient_timer
+				RETURN
+
+
+DELAY
+    movlw    D'50'            ; Counter = 41
+    movwf    count2            ; Store in variable
+delay
+    call    delay_125mcs        ; Delay
+    decfsz    count2,f        ; 40 times = 5 milliseconds
+    goto    delay
+    return                ; End of delay
+
+delay_125mcs
+    movlw    D'42'            ; Repeat 42 machine cycles
+    movwf    count1            ; Store value in counter
+repeat
+    decfsz    count1,f           ; Decrement counter
+    goto    repeat            ; Continue if not 0
+    return                    ; End of delay
+
+DELAYBIG
+    movlw    D'20'            ; Counter = 255
+    movwf    count3            ; Store in variable
+delaybig
+    call    DELAY        ; Delay
+    decfsz    count3,f        ; 255 times 5 ms= 1.3seconds
+    goto    delaybig
+    return                ; End of delay
+
+DELAYBIGGER
+
+    movlw    D'255'            ; Counter = 41
+    movwf    count4            ; Store in variable
+delaybigger
+    call    DELAYBIG        ; Delay
+    decfsz    count4,f        ; 40 times = 5 milliseconds
+    goto    delaybigger
+    return                ; End of delay
+
+END
+
